@@ -1,3 +1,21 @@
+@app.route("/search")
+def search():
+    query = request.args.get("query", "").lower()
+    if not query:
+        return render_template("search.html", results=None)
+    
+    # 예시: 상품 목록이 리스트로 존재한다고 가정
+    # 실제로는 DB에서 필터링해야 함
+    sample_products = [
+        {"id": 1, "title": "아이폰 12", "price": "500000"},
+        {"id": 2, "title": "갤럭시 버즈", "price": "80000"},
+        {"id": 3, "title": "맥북 프로", "price": "1500000"},
+    ]
+    
+    results = [p for p in sample_products if query in p["title"].lower()]
+    
+    return render_template("search.html", results=results)
+
 @app.route("/send", methods=["GET", "POST"])
 def send_money():
     if request.method == "POST":
