@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}관리자 페이지{% endblock %}
+{% block content %}
+<h2>관리자 제어판</h2>
+<ul>
+  <li><a href="{{ url_for('manage_users') }}">사용자 관리</a></li>
+  <li><a href="{{ url_for('manage_products') }}">상품 관리</a></li>
+  <li><a href="{{ url_for('reports') }}">신고 내역 확인</a></li>
+</ul>
+{% endblock %}
