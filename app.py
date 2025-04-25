@@ -209,27 +209,43 @@ def profile():
     current_user = cursor.fetchone()
     return render_template('profile.html', user=current_user)
 
-# 상품 등록
 @app.route('/product/new', methods=['GET', 'POST'])
 def new_product():
     if 'user_id' not in session:
         return redirect(url_for('login'))
+
     if request.method == 'POST':
-        title = sanitize_input(request.form['title'])
-        description = sanitize_input(request.form['description'])
-        image_url = sanitize_input(request.form['image_url'])
-        price = request.form['price']
+        title = sanitize_input(request.form['title']).strip()
+        description = sanitize_input(request.form['description']).strip()
+        image_url = sanitize_input(request.form['image_url']).strip()
+        price_str = request.form['price'].strip()
+
+        if not title or not description or not price_str:
+            flash("모든 항목을 입력해야 합니다.")
+            return redirect(url_for('new_product'))
+
+        try:
+            price = float(price_str)
+            if price <= 0 or price > 10000000:
+                flash("가격은 0보다 크고 1,000만 이하이어야 합니다.")
+                return redirect(url_for('new_product'))
+        except ValueError:
+            flash("가격은 숫자 형식이어야 합니다.")
+            return redirect(url_for('new_product'))
+
         db = get_db()
         cursor = db.cursor()
         product_id = str(uuid.uuid4())
         cursor.execute(
             "INSERT INTO product (id, title, description, price, seller_id) VALUES (?, ?, ?, ?, ?)",
-            (product_id, title, image_url, description, price, session['user_id'])
+            (product_id, title, description, price, session['user_id'])
         )
         db.commit()
         flash('상품이 등록되었습니다.')
         return redirect(url_for('dashboard'))
+
     return render_template('new_product.html')
+
 
 # 상품 상세보기
 @app.route('/product/<product_id>')
@@ -273,12 +289,25 @@ def search():
 def send_money():
     if not session.get('reauthenticated'):
         return redirect(url_for('reauth'))
-    if request.method == "POST":
-        receiver_id = request.form["receiver_id"]
-        amount = request.form["amount"]
-        
-        print(f"사용자에게 송금: 받는 사람 = {receiver_id}, 금액 = {amount}")
 
+    if request.method == "POST":
+        receiver_id = request.form.get("receiver_id", "").strip()
+        amount_str = request.form.get("amount", "").strip()
+
+        if not receiver_id or not amount_str:
+            flash("모든 항목을 입력해주세요.")
+            return redirect(url_for("send_money"))
+
+        try:
+            amount = float(amount_str)
+            if amount <= 0 or amount > 10000000:
+                flash("송금 금액은 0보다 크고 1,000만 이하이어야 합니다.")
+                return redirect(url_for("send_money"))
+        except ValueError:
+            flash("금액은 숫자로 입력해주세요.")
+            return redirect(url_for("send_money"))
+
+        # 여기에 실제 송금 로직이 들어감
         flash("송금이 완료되었습니다!")
         return redirect(url_for("dashboard"))
 
@@ -351,6 +380,10 @@ def delete_product(product_id):
     if 'user_id' not in session:
         return redirect(url_for('login'))
 
+    if not product_id:
+        flash("상품 ID가 유효하지 않습니다.")
+        return redirect(url_for('my_products'))
+
     db = get_db()
     cursor = db.cursor()
     cursor.execute("SELECT * FROM product WHERE id = ?", (product_id,))
@@ -364,6 +397,7 @@ def delete_product(product_id):
     db.commit()
     flash("상품이 삭제되었습니다.")
     return redirect(url_for('my_products'))
+
 
 @app.route('/chat/<target_id>')
 def private_chat(target_id):
@@ -393,10 +427,15 @@ def handle_private_message(data):
 def report():
     if 'user_id' not in session:
         return redirect(url_for('login'))
-    
+
     if request.method == 'POST':
-        target_id = request.form['target_id']
-        reason = sanitize_input(request.form['reason'])
+        target_id = request.form.get('target_id', '').strip()
+        reason = sanitize_input(request.form.get('reason', '')).strip()
+
+        if not target_id or not reason:
+            flash("모든 항목을 입력해주세요.")
+            return redirect(url_for('report'))
+
         db = get_db()
         cursor = db.cursor()
         report_id = str(uuid.uuid4())
@@ -406,14 +445,10 @@ def report():
             (report_id, session['user_id'], target_id, reason)
         )
 
-        # 상품 신고 누적 3건 이상이면 차단
         cursor.execute("SELECT COUNT(*) FROM report WHERE target_id = ?", (target_id,))
         report_count = cursor.fetchone()[0]
 
-        # 상품 차단
         cursor.execute("UPDATE product SET is_blocked = 1 WHERE id = ? AND ? >= 3", (target_id, report_count))
-        
-        # 사용자 차단
         cursor.execute("UPDATE user SET is_dormant = 1 WHERE id = ? AND ? >= 5", (target_id, report_count))
 
         db.commit()
@@ -421,6 +456,7 @@ def report():
         return redirect(url_for('dashboard'))
 
     return render_template('report.html')
+
 
 @app.route('/reauth', methods=['GET', 'POST'])
 def reauth():
@@ -436,3 +472,12 @@ def reauth():
         else:
             flash("비밀번호가 일치하지 않습니다.")
     return render_template('reauth.html')
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    import traceback
+    print("서버 내부 오류 발생:", traceback.format_exc())  # 콘솔/로그에 출력
+
+    # 사용자에게는 단순 메시지만 보여줌
+    flash("알 수 없는 오류가 발생했습니다. 관리자에게 문의하세요.")
+    return redirect(url_for('index'))
