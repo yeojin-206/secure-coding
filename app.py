@@ -4,13 +4,18 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from flask_socketio import SocketIO, send
 import re
 from flask_wtf import CSRFProtect
-from werkzeug.security import generate_password_hash
+from werkzeug.security import generate_password_hash,check_password_hash
+from datetime import timedelta
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
 DATABASE = 'market.db'
 socketio = SocketIO(app)
 csrf = CSRFProtect(app)
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)#30분 비활동 시 만료
+
 
 def sanitize_input(s):
     # 모든 HTML 태그 제거_XSS공격 방지용
@@ -118,6 +123,7 @@ def login():
         user = cursor.fetchone()
 
         if user and check_password_hash(user['password'], password):
+            session.permanent = True  # 세션 타임아웃 적용
             session['user_id'] = user['id']
             session['username'] = user['username']
             session['is_admin'] = user['is_admin']
@@ -125,6 +131,7 @@ def login():
             return redirect(url_for('dashboard'))
         else:
             flash("아이디 또는 비밀번호가 잘못되었습니다.")
+    return render_template('login.html')
 
 # 로그아웃
 @app.route('/logout')
@@ -166,7 +173,8 @@ def profile():
 
         # 비밀번호 변경 요청이 있으면 업데이트
         if new_password.strip():  # 공백 제외하고 비어있지 않다면
-            cursor.execute("UPDATE user SET password = ? WHERE id = ?", (new_password, session['user_id']))
+            hashed_pw = generate_password_hash(new_password)
+            cursor.execute("UPDATE user SET password = ? WHERE id = ?", (hashed_pw, session['user_id']))
             flash('비밀번호가 변경되었습니다.')
 
         db.commit()
@@ -239,14 +247,15 @@ def search():
 
 @app.route("/send", methods=["GET", "POST"])
 def send_money():
+    if not session.get('reauthenticated'):
+        return redirect(url_for('reauth'))
     if request.method == "POST":
         receiver_id = request.form["receiver_id"]
         amount = request.form["amount"]
         
-        # 여기서 실제 송금 로직 처리: DB 업데이트 등
         print(f"사용자에게 송금: 받는 사람 = {receiver_id}, 금액 = {amount}")
 
-        flash("송금이 완료되었습니다!")  # 위에 flash 메시지 표시됨
+        flash("송금이 완료되었습니다!")
         return redirect(url_for("dashboard"))
 
     return render_template("send_money.html")
@@ -388,3 +397,18 @@ def report():
         return redirect(url_for('dashboard'))
 
     return render_template('report.html')
+
+@app.route('/reauth', methods=['GET', 'POST'])
+def reauth():
+    if request.method == 'POST':
+        password = request.form['password']
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("SELECT * FROM user WHERE id = ?", (session['user_id'],))
+        user = cursor.fetchone()
+        if user and check_password_hash(user['password'], password):
+            session['reauthenticated'] = True
+            return redirect(url_for('change_password'))
+        else:
+            flash("비밀번호가 일치하지 않습니다.")
+    return render_template('reauth.html')
