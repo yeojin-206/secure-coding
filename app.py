@@ -271,15 +271,54 @@ def view_product(product_id):
     seller = cursor.fetchone()
     return render_template('view_product.html', product=product, seller=seller)
 
+from time import time
+
+# 사용자별 최근 메시지 타임스탬프 저장용
+user_message_times = {}
+
 @socketio.on('send_message')
 def handle_send_message_event(data):
-    message = sanitize_input(data['message'])
-    username = data.get('username')
-    emit('message', {'username': username, 'message': message}, broadcast=True)
+    if 'user_id' not in session:
+        print("비인증 사용자 메시지 차단됨")
+        return  # 인증 안 된 사용자 무시
+
+    user_id = session['user_id']
+    now = time()
+
+    user_message_times.setdefault(user_id, [])
+    user_message_times[user_id] = [t for t in user_message_times[user_id] if now - t <= 10]
+
+    if len(user_message_times[user_id]) >= 5:
+        print("스팸 메시지 차단됨")
+        return
+
+    user_message_times[user_id].append(now)
+
+    if not isinstance(data, dict) or 'message' not in data or 'username' not in data:
+        print("잘못된 메시지 형식")
+        return
+
+    message = data['message']
+    username = data['username']
+
+    if not (1 <= len(message) <= 200):
+        print("메시지 길이 제한 초과")
+        return
+
+    if not re.match(r'^[가-힣a-zA-Z0-9\s.,!?()\[\]\-_:;"\']+$', message):
+        print("허용되지 않은 문자 포함")
+        return
+
+    clean_message = sanitize_input(message)
+
+    emit('message', {
+        'username': sanitize_input(username),
+        'message': clean_message
+    }, broadcast=True)
 
 if __name__ == '__main__':
     init_db()  # 앱 컨텍스트 내에서 테이블 생성
-    socketio.run(app, debug=True)
+    socketio.run(app, ssl_context='adhoc')
 
 @app.route("/search")
 def search():
@@ -431,42 +470,87 @@ def handle_join_room(data):
 
 @socketio.on('private_message')
 def handle_private_message(data):
-    message = sanitize_input(data['message'])
-    room = data['room']
-    sender = data['sender']
-    emit('private_message', {'sender': sender, 'message': message}, room=room)
+    if 'user_id' not in session:
+        print("비인증 사용자 1:1 메시지 차단됨")
+        return
 
+    required_keys = ['room', 'sender', 'receiver', 'message']
+    if not all(k in data for k in required_keys):
+        print("메시지 형식 오류")
+        return
+
+    message = data['message']
+    if not (1 <= len(message) <= 200):
+        print("메시지 길이 초과")
+        return
+
+    if not re.match(r'^[가-힣a-zA-Z0-9\s.,!?()\[\]\-_:;"\']+$', message):
+        print("허용되지 않은 문자 포함")
+        return
+
+    clean_message = sanitize_input(message)
+
+    emit('private_message', {
+        'sender': sanitize_input(data['sender']),
+        'message': clean_message
+    }, room=data['room'])
+
+from datetime import datetime
+from time import time
 
 @app.route('/report', methods=['GET', 'POST'])
 def report():
     if 'user_id' not in session:
         return redirect(url_for('login'))
 
+    user_id = session['user_id']
+    db = get_db()
+    cursor = db.cursor()
+
     if request.method == 'POST':
-        target_id = request.form.get('target_id', '').strip()
-        reason = sanitize_input(request.form.get('reason', '')).strip()
+        target_id = sanitize_input(request.form.get('target_id', '').strip())
+        reason = sanitize_input(request.form.get('reason', '').strip())
 
         if not target_id or not reason:
             flash("모든 항목을 입력해주세요.")
             return redirect(url_for('report'))
+        if len(target_id) > 64:
+            flash("대상 ID는 64자 이하로 입력해주세요.")
+            return redirect(url_for('report'))
+        if len(reason) > 500:
+            flash("신고 사유는 500자 이하로 입력해주세요.")
+            return redirect(url_for('report'))
 
-        db = get_db()
-        cursor = db.cursor()
+        cursor.execute("""
+            SELECT * FROM report
+            WHERE reporter_id = ? AND target_id = ?
+        """, (user_id, target_id))
+        if cursor.fetchone():
+            flash("이미 이 대상을 신고하셨습니다.")
+            return redirect(url_for('report'))
+
+        cursor.execute("""
+            SELECT COUNT(*) FROM report
+            WHERE reporter_id = ? AND DATE(created_at) = DATE('now')
+        """, (user_id,))
+        count_today = cursor.fetchone()[0]
+        if count_today >= 5:
+            flash("하루 최대 5건의 신고만 가능합니다.")
+            return redirect(url_for('report'))
+
         report_id = str(uuid.uuid4())
+        created_at = datetime.utcnow().isoformat()
 
-        cursor.execute(
-            "INSERT INTO report (id, reporter_id, target_id, reason) VALUES (?, ?, ?, ?)",
-            (report_id, session['user_id'], target_id, reason)
-        )
-
-        cursor.execute("SELECT COUNT(*) FROM report WHERE target_id = ?", (target_id,))
-        report_count = cursor.fetchone()[0]
-
-        cursor.execute("UPDATE product SET is_blocked = 1 WHERE id = ? AND ? >= 3", (target_id, report_count))
-        cursor.execute("UPDATE user SET is_dormant = 1 WHERE id = ? AND ? >= 5", (target_id, report_count))
+        cursor.execute("""
+            INSERT INTO report (id, reporter_id, target_id, reason, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (report_id, user_id, target_id, reason, created_at))
 
         db.commit()
-        flash('신고가 접수되었습니다.')
+
+        print(f"[신고 로그] {user_id} → {target_id} 이유: {reason}")
+
+        flash("신고가 접수되었습니다.")
         return redirect(url_for('dashboard'))
 
     return render_template('report.html')
