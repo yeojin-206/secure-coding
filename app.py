@@ -466,6 +466,7 @@ def private_chat(target_id):
         flash("대상을 찾을 수 없습니다.")
         return redirect(url_for('dashboard'))
     return render_template('private_chat.html', target_id=target_id, target_username=target_user['username'])
+
 @socketio.on('join_room')
 def handle_join_room(data):
     join_room(data['room'])
