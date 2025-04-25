@@ -84,8 +84,6 @@ def register():
         flash('회원가입이 완료되었습니다. 로그인 해주세요.')
         return redirect(url_for('login'))
     return render_template('register.html')
-
-# 로그인
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -95,13 +93,21 @@ def login():
         cursor = db.cursor()
         cursor.execute("SELECT * FROM user WHERE username = ? AND password = ?", (username, password))
         user = cursor.fetchone()
+
         if user:
+            if user['is_dormant']:
+                flash("휴면 계정입니다. 관리자에게 문의하세요.")
+                return redirect(url_for('login'))
+
             session['user_id'] = user['id']
+            if user['is_admin']:
+                session['is_admin'] = True
             flash('로그인 성공!')
             return redirect(url_for('dashboard'))
         else:
             flash('아이디 또는 비밀번호가 올바르지 않습니다.')
             return redirect(url_for('login'))
+
     return render_template('login.html')
 
 # 로그아웃
@@ -349,3 +355,4 @@ def handle_join_room(data):
 @socketio.on('private_message')
 def handle_private_message(data):
     emit('private_message', data, room=data['room'])
+        # 상품 신고 누적 3건 이상이면 차단

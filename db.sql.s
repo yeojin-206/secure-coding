@@ -1,5 +1,10 @@
+CREATE TABLE IF NOT EXISTS user (
+    id TEXT PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
+    bio TEXT,
     is_admin INTEGER DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS product (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -8,3 +13,5 @@ CREATE TABLE IF NOT EXISTS product (
     image_url TEXT,
     seller_id TEXT NOT NULL
 )
+ALTER TABLE product ADD COLUMN is_blocked INTEGER DEFAULT 0;
+ALTER TABLE user ADD COLUMN is_dormant INTEGER DEFAULT 0;
