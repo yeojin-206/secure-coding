@@ -227,17 +227,12 @@ def search():
     query = request.args.get("query", "").lower()
     if not query:
         return render_template("search.html", results=None)
-    
-    # 예시: 상품 목록이 리스트로 존재한다고 가정
-    # 실제로는 DB에서 필터링해야 함
-    sample_products = [
-        {"id": 1, "title": "아이폰 12", "price": "500000"},
-        {"id": 2, "title": "갤럭시 버즈", "price": "80000"},
-        {"id": 3, "title": "맥북 프로", "price": "1500000"},
-    ]
-    
-    results = [p for p in sample_products if query in p["title"].lower()]
-    
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM product WHERE LOWER(title) LIKE ?", ('%' + query + '%',))
+    results = cursor.fetchall()
+
     return render_template("search.html", results=results)
 
 @app.route("/send", methods=["GET", "POST"])
@@ -247,7 +242,6 @@ def send_money():
         amount = request.form["amount"]
         
         # 여기서 실제 송금 로직 처리: DB 업데이트 등
-        # 지금은 예시로 출력만 해볼게
         print(f"사용자에게 송금: 받는 사람 = {receiver_id}, 금액 = {amount}")
 
         flash("송금이 완료되었습니다!")  # 위에 flash 메시지 표시됨
@@ -262,4 +256,76 @@ def admin():
         return redirect(url_for("dashboard"))
     return render_template("admin.html")
 
+def init_db():
+    with app.app_context():
+        db = get_db()
+        cursor = db.cursor()
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user (
+                id TEXT PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                bio TEXT,
+                is_admin INTEGER DEFAULT 0
+            )
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS product (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                price TEXT NOT NULL,
+                seller_id TEXT NOT NULL
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS report (
+                id TEXT PRIMARY KEY,
+                reporter_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                reason TEXT NOT NULL
+            )
+        """)
+
+        cursor.execute("SELECT * FROM user WHERE username = 'admin'")
+        if not cursor.fetchone():
+            admin_id = str(uuid.uuid4())
+            cursor.execute(
+                "INSERT INTO user (id, username, password, bio, is_admin) VALUES (?, ?, ?, ?, 1)",
+                (admin_id, 'admin', 'adminpass', '관리자 계정입니다.')
+            )
+
+        db.commit()
+
+@app.route('/myproducts')
+def my_products():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM product WHERE seller_id = ?", (session['user_id'],))
+    my_items = cursor.fetchall()
+
+    return render_template('my_products.html', products=my_items)
+
+@app.route('/product/delete/<product_id>', methods=['POST'])
+def delete_product(product_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM product WHERE id = ?", (product_id,))
+    product = cursor.fetchone()
+
+    if not product or product['seller_id'] != session['user_id']:
+        flash("삭제 권한이 없습니다.")
+        return redirect(url_for('my_products'))
+
+    cursor.execute("DELETE FROM product WHERE id = ?", (product_id,))
+    db.commit()
+    flash("상품이 삭제되었습니다.")
+    return redirect(url_for('my_products'))

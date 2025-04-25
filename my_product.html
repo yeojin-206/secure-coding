@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}내 상품 목록{% endblock %}
+{% block content %}
+<h2>내가 등록한 상품들</h2>
+<ul>
+  {% for product in products %}
+    <li>
+      <a href="{{ url_for('view_product', product_id=product.id) }}">{{ product.title }}</a> - {{ product.price }}
+      <form action="{{ url_for('delete_product', product_id=product.id) }}" method="post" style="display:inline;">
+        <button type="submit">삭제</button>
+      </form>
+    </li>
+  {% endfor %}
+</ul>
+{% endblock %}
