@@ -94,6 +94,7 @@
       <a href="{{ url_for('send_money') }}">송금</a>
       <a href="{{ url_for('report') }}">신고하기</a>
       <a href="{{ url_for('logout') }}">로그아웃</a>
+      <a href="{{ url_for('my_products') }}">내 상품</a>
       {% if session.get('is_admin') %}
         <a href="{{ url_for('admin') }}">관리자</a>
       {% endif %}

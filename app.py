@@ -355,4 +355,36 @@ def handle_join_room(data):
 @socketio.on('private_message')
 def handle_private_message(data):
     emit('private_message', data, room=data['room'])
+
+@app.route('/report', methods=['GET', 'POST'])
+def report():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    
+    if request.method == 'POST':
+        target_id = request.form['target_id']
+        reason = request.form['reason']
+        db = get_db()
+        cursor = db.cursor()
+        report_id = str(uuid.uuid4())
+
+        cursor.execute(
+            "INSERT INTO report (id, reporter_id, target_id, reason) VALUES (?, ?, ?, ?)",
+            (report_id, session['user_id'], target_id, reason)
+        )
+
         # 상품 신고 누적 3건 이상이면 차단
+        cursor.execute("SELECT COUNT(*) FROM report WHERE target_id = ?", (target_id,))
+        report_count = cursor.fetchone()[0]
+
+        # 상품 차단
+        cursor.execute("UPDATE product SET is_blocked = 1 WHERE id = ? AND ? >= 3", (target_id, report_count))
+        
+        # 사용자 차단
+        cursor.execute("UPDATE user SET is_dormant = 1 WHERE id = ? AND ? >= 5", (target_id, report_count))
+
+        db.commit()
+        flash('신고가 접수되었습니다.')
+        return redirect(url_for('dashboard'))
+
+    return render_template('report.html')
