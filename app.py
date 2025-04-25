@@ -329,3 +329,23 @@ def delete_product(product_id):
     db.commit()
     flash("상품이 삭제되었습니다.")
     return redirect(url_for('my_products'))
+
+@app.route('/chat/<target_id>')
+def private_chat(target_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM user WHERE id = ?", (target_id,))
+    target_user = cursor.fetchone()
+    if not target_user:
+        flash("대상을 찾을 수 없습니다.")
+        return redirect(url_for('dashboard'))
+    return render_template('private_chat.html', target_id=target_id, target_username=target_user['username'])
+@socketio.on('join_room')
+def handle_join_room(data):
+    join_room(data['room'])
+
+@socketio.on('private_message')
+def handle_private_message(data):
+    emit('private_message', data, room=data['room'])

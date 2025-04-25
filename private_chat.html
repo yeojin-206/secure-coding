@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}1:1 채팅{% endblock %}
+{% block content %}
+<h2>{{ target_username }}님과의 1:1 채팅</h2>
+<div id="private_chat_box">
+  <ul id="messages"></ul>
+  <input id="chat_input" placeholder="메시지를 입력하세요">
+  <button onclick="sendMessage()">전송</button>
+</div>
+
+<script>
+  const socket = io();
+  const sender_id = "{{ session['user_id'] }}";
+  const receiver_id = "{{ target_id }}";
+  const room_id = [sender_id, receiver_id].sort().join("_");
+
+  socket.emit('join_room', { room: room_id });
+
+  socket.on('private_message', function(data) {
+    const li = document.createElement('li');
+    li.textContent = data.sender + ": " + data.message;
+    document.getElementById('messages').appendChild(li);
+  });
+
+  function sendMessage() {
+    const input = document.getElementById('chat_input');
+    const message = input.value;
+    socket.emit('private_message', {
+      room: room_id,
+      sender: sender_id,
+      receiver: receiver_id,
+      message: message
+    });
+    input.value = "";
+  }
+</script>
+{% endblock %}
