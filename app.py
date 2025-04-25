@@ -189,7 +189,7 @@ def profile():
     cursor = db.cursor()
 
     if request.method == 'POST':
-        bio = request.form.get('bio', '')
+        bio = sanitize_input(request.form.get('bio', '').strip())
         new_password = request.form.get('new_password', '')
 
         # bio 업데이트
@@ -224,6 +224,17 @@ def new_product():
             flash("모든 항목을 입력해야 합니다.")
             return redirect(url_for('new_product'))
 
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("SELECT * FROM product WHERE title = ?", (title,))
+        if cursor.fetchone():
+            flash("같은 이름의 상품이 이미 존재합니다.")
+            return redirect(url_for('new_product'))
+
+        if image_url and not re.match(r'^https?://', image_url):
+            flash("이미지 URL은 http:// 또는 https://로 시작해야 합니다.")
+            return redirect(url_for('new_product'))
+
         try:
             price = float(price_str)
             if price <= 0 or price > 10000000:
@@ -233,12 +244,10 @@ def new_product():
             flash("가격은 숫자 형식이어야 합니다.")
             return redirect(url_for('new_product'))
 
-        db = get_db()
-        cursor = db.cursor()
         product_id = str(uuid.uuid4())
         cursor.execute(
-            "INSERT INTO product (id, title, description, price, seller_id) VALUES (?, ?, ?, ?, ?)",
-            (product_id, title, description, price, session['user_id'])
+            "INSERT INTO product (id, title, description, image_url, price, seller_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (product_id, title, description, image_url, price, session['user_id'])
         )
         db.commit()
         flash('상품이 등록되었습니다.')
@@ -389,9 +398,14 @@ def delete_product(product_id):
     cursor.execute("SELECT * FROM product WHERE id = ?", (product_id,))
     product = cursor.fetchone()
 
-    if not product or product['seller_id'] != session['user_id']:
-        flash("삭제 권한이 없습니다.")
+    if not product:
+        flash("상품을 찾을 수 없습니다.")
         return redirect(url_for('my_products'))
+
+    if product['seller_id'] != session['user_id']:
+        flash("이 상품에 대한 삭제 권한이 없습니다.")
+        return redirect(url_for('my_products'))
+
 
     cursor.execute("DELETE FROM product WHERE id = ?", (product_id,))
     db.commit()
@@ -457,7 +471,6 @@ def report():
 
     return render_template('report.html')
 
-
 @app.route('/reauth', methods=['GET', 'POST'])
 def reauth():
     if request.method == 'POST':
@@ -481,3 +494,92 @@ def handle_exception(e):
     # 사용자에게는 단순 메시지만 보여줌
     flash("알 수 없는 오류가 발생했습니다. 관리자에게 문의하세요.")
     return redirect(url_for('index'))
+
+@app.route('/product/edit/<product_id>', methods=['GET', 'POST'])
+def edit_product(product_id):
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM product WHERE id = ?", (product_id,))
+    product = cursor.fetchone()
+
+    if not product:
+        flash("상품을 찾을 수 없습니다.")
+        return redirect(url_for('dashboard'))
+
+    if product['seller_id'] != session['user_id']:
+        flash("이 상품에 대한 수정 권한이 없습니다.")
+        return redirect(url_for('dashboard'))
+
+    if request.method == 'POST':
+        title = sanitize_input(request.form['title']).strip()
+        description = sanitize_input(request.form['description']).strip()
+        image_url = sanitize_input(request.form['image_url']).strip()
+        price_str = request.form['price'].strip()
+
+        if not title or not description or not price_str:
+            flash("모든 항목을 입력해야 합니다.")
+            return redirect(url_for('edit_product', product_id=product_id))
+
+        if len(title) > 100 or len(description) > 1000:
+            flash("제목은 100자 이하, 설명은 1000자 이하로 입력해주세요.")
+            return redirect(url_for('edit_product', product_id=product_id))
+
+        if image_url and not re.match(r'^https?://', image_url):
+            flash("이미지 URL은 http:// 또는 https://로 시작해야 합니다.")
+            return redirect(url_for('edit_product', product_id=product_id))
+
+        try:
+            price = float(price_str)
+            if price <= 0 or price > 10000000:
+                flash("가격은 0보다 크고 1,000만 이하이어야 합니다.")
+                return redirect(url_for('edit_product', product_id=product_id))
+        except ValueError:
+            flash("가격은 숫자 형식이어야 합니다.")
+            return redirect(url_for('edit_product', product_id=product_id))
+
+        cursor.execute(
+            "SELECT * FROM product WHERE title = ? AND id != ?",
+            (title, product_id)
+        )
+        if cursor.fetchone():
+            flash("같은 이름의 상품이 이미 존재합니다.")
+            return redirect(url_for('edit_product', product_id=product_id))
+
+        cursor.execute("""
+            UPDATE product
+            SET title = ?, description = ?, image_url = ?, price = ?
+            WHERE id = ?
+        """, (title, description, image_url, price, product_id))
+
+        db.commit()
+        flash("상품이 수정되었습니다.")
+        return redirect(url_for('view_product', product_id=product_id))
+
+    return render_template('edit_product.html', product=product)
+
+def validate_product_input(title, description, image_url, price_str):
+    errors = []
+
+    title = sanitize_input(title).strip()
+    description = sanitize_input(description).strip()
+    image_url = sanitize_input(image_url).strip()
+    price_str = price_str.strip()
+
+    if not title or len(title) > 100:
+        errors.append("제목은 1~100자 사이여야 합니다.")
+
+    if not description or len(description) > 1000:
+        errors.append("설명은 1~1000자 사이여야 합니다.")
+
+    try:
+        price = float(price_str)
+        if price <= 0 or price > 10000000:
+            errors.append("가격은 0보다 크고 1,000만 이하이어야 합니다.")
+    except ValueError:
+        errors.append("가격은 숫자 형식이어야 합니다.")
+        price = None
+
+    return errors, title, description, image_url, price
