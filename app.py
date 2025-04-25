@@ -167,9 +167,10 @@ def new_product():
         db = get_db()
         cursor = db.cursor()
         product_id = str(uuid.uuid4())
+        image_url = request.form['image_url']
         cursor.execute(
             "INSERT INTO product (id, title, description, price, seller_id) VALUES (?, ?, ?, ?, ?)",
-            (product_id, title, description, price, session['user_id'])
+            (product_id, title, image_url, description, price, session['user_id'])
         )
         db.commit()
         flash('상품이 등록되었습니다.')
