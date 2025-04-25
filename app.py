@@ -3,11 +3,17 @@ import uuid
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 from flask_socketio import SocketIO, send
 import re
+from flask_wtf import CSRFProtect
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
 DATABASE = 'market.db'
 socketio = SocketIO(app)
+csrf = CSRFProtect(app)
+
+def sanitize_input(s):
+    # 모든 HTML 태그 제거_XSS공격 방지용
+    return re.sub(r'<.*?>', '', s)
 
 # 데이터베이스 연결 관리: 요청마다 연결 생성 후 사용, 종료 시 close
 def get_db():
@@ -186,13 +192,13 @@ def new_product():
     if 'user_id' not in session:
         return redirect(url_for('login'))
     if request.method == 'POST':
-        title = request.form['title']
-        description = request.form['description']
+        title = sanitize_input(request.form['title'])
+        description = sanitize_input(request.form['description'])
+        image_url = sanitize_input(request.form['image_url'])
         price = request.form['price']
         db = get_db()
         cursor = db.cursor()
         product_id = str(uuid.uuid4())
-        image_url = request.form['image_url']
         cursor.execute(
             "INSERT INTO product (id, title, description, price, seller_id) VALUES (?, ?, ?, ?, ?)",
             (product_id, title, image_url, description, price, session['user_id'])
@@ -217,31 +223,11 @@ def view_product(product_id):
     seller = cursor.fetchone()
     return render_template('view_product.html', product=product, seller=seller)
 
-# 신고하기
-@app.route('/report', methods=['GET', 'POST'])
-def report():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    if request.method == 'POST':
-        target_id = request.form['target_id']
-        reason = request.form['reason']
-        db = get_db()
-        cursor = db.cursor()
-        report_id = str(uuid.uuid4())
-        cursor.execute(
-            "INSERT INTO report (id, reporter_id, target_id, reason) VALUES (?, ?, ?, ?)",
-            (report_id, session['user_id'], target_id, reason)
-        )
-        db.commit()
-        flash('신고가 접수되었습니다.')
-        return redirect(url_for('dashboard'))
-    return render_template('report.html')
-
-# 실시간 채팅: 클라이언트가 메시지를 보내면 전체 브로드캐스트
 @socketio.on('send_message')
 def handle_send_message_event(data):
-    data['message_id'] = str(uuid.uuid4())
-    send(data, broadcast=True)
+    message = sanitize_input(data['message'])
+    username = data.get('username')
+    emit('message', {'username': username, 'message': message}, broadcast=True)
 
 if __name__ == '__main__':
     init_db()  # 앱 컨텍스트 내에서 테이블 생성
@@ -373,7 +359,11 @@ def handle_join_room(data):
 
 @socketio.on('private_message')
 def handle_private_message(data):
-    emit('private_message', data, room=data['room'])
+    message = sanitize_input(data['message'])
+    room = data['room']
+    sender = data['sender']
+    emit('private_message', {'sender': sender, 'message': message}, room=room)
+
 
 @app.route('/report', methods=['GET', 'POST'])
 def report():
@@ -382,7 +372,7 @@ def report():
     
     if request.method == 'POST':
         target_id = request.form['target_id']
-        reason = request.form['reason']
+        reason = sanitize_input(request.form['reason'])
         db = get_db()
         cursor = db.cursor()
         report_id = str(uuid.uuid4())

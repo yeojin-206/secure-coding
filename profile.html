@@ -2,6 +2,7 @@
 <p>사용자명: {{ user.username }}</p>
 
 <form method="post">
+  {{ csrf_token() }}
   <label>소개글:</label><br>
   <textarea name="bio" rows="4" cols="50">{{ user.bio or '' }}</textarea><br>
 
