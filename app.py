@@ -4,6 +4,7 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from flask_socketio import SocketIO, send
 import re
 from flask_wtf import CSRFProtect
+from werkzeug.security import generate_password_hash
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
@@ -83,7 +84,6 @@ def register():
         username = request.form['username']
         password = request.form['password']
 
-        #유효성 검사
         if not is_valid_username(username):
             flash("아이디는 4~20자의 영문자/숫자/밑줄만 허용됩니다.")
             return redirect(url_for('register'))
@@ -93,16 +93,13 @@ def register():
 
         db = get_db()
         cursor = db.cursor()
-
-        #사용자명 중복 체크
         cursor.execute("SELECT * FROM user WHERE username = ?", (username,))
-        existing_user = cursor.fetchone()
-        if existing_user:
+        if cursor.fetchone():
             flash("이미 존재하는 사용자명입니다.")
             return redirect(url_for('register'))
 
-        #DB에 저장
-        cursor.execute("INSERT INTO user (username, password) VALUES (?, ?)", (username, password))
+        hashed_password = generate_password_hash(password)
+        cursor.execute("INSERT INTO user (username, password) VALUES (?, ?)", (username, hashed_password))
         db.commit()
         flash('회원가입이 완료되었습니다.')
         return redirect(url_for('login'))
@@ -114,26 +111,20 @@ def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
+
         db = get_db()
         cursor = db.cursor()
-        cursor.execute("SELECT * FROM user WHERE username = ? AND password = ?", (username, password))
+        cursor.execute("SELECT * FROM user WHERE username = ?", (username,))
         user = cursor.fetchone()
 
-        if user:
-            if user['is_dormant']:
-                flash("휴면 계정입니다. 관리자에게 문의하세요.")
-                return redirect(url_for('login'))
-
+        if user and check_password_hash(user['password'], password):
             session['user_id'] = user['id']
-            if user['is_admin']:
-                session['is_admin'] = True
-            flash('로그인 성공!')
+            session['username'] = user['username']
+            session['is_admin'] = user['is_admin']
+            flash("로그인 성공")
             return redirect(url_for('dashboard'))
         else:
-            flash('아이디 또는 비밀번호가 올바르지 않습니다.')
-            return redirect(url_for('login'))
-
-    return render_template('login.html')
+            flash("아이디 또는 비밀번호가 잘못되었습니다.")
 
 # 로그아웃
 @app.route('/logout')
