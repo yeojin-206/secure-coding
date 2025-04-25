@@ -122,15 +122,39 @@ def login():
         cursor.execute("SELECT * FROM user WHERE username = ?", (username,))
         user = cursor.fetchone()
 
-        if user and check_password_hash(user['password'], password):
-            session.permanent = True  # 세션 타임아웃 적용
+        if not user:
+            flash("아이디 또는 비밀번호가 잘못되었습니다.")
+            return render_template('login.html')
+
+        if user['is_locked']:
+            flash("이 계정은 잠겨 있습니다. 관리자에게 문의하세요.")
+            return render_template('login.html')
+
+        if check_password_hash(user['password'], password):
+            session.permanent = True
             session['user_id'] = user['id']
             session['username'] = user['username']
             session['is_admin'] = user['is_admin']
+
+            # 로그인 성공 시 실패 횟수 초기화
+            cursor.execute("UPDATE user SET failed_attempts = 0 WHERE id = ?", (user['id'],))
+            db.commit()
+
             flash("로그인 성공")
             return redirect(url_for('dashboard'))
         else:
-            flash("아이디 또는 비밀번호가 잘못되었습니다.")
+            # 실패 횟수 증가
+            failed_attempts = user['failed_attempts'] + 1
+            is_locked = 1 if failed_attempts >= 5 else 0
+            cursor.execute("UPDATE user SET failed_attempts = ?, is_locked = ? WHERE id = ?",
+                           (failed_attempts, is_locked, user['id']))
+            db.commit()
+
+            if is_locked:
+                flash("로그인 5회 실패로 계정이 잠겼습니다.")
+            else:
+                flash(f"비밀번호가 잘못되었습니다. ({failed_attempts}/5)")
+
     return render_template('login.html')
 
 # 로그아웃
