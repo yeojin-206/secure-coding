@@ -2,6 +2,7 @@ import sqlite3
 import uuid
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 from flask_socketio import SocketIO, send
+import re
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
@@ -64,26 +65,44 @@ def index():
         return redirect(url_for('dashboard'))
     return render_template('index.html')
 
-# 회원가입
+def is_valid_username(username):
+    return re.match(r'^[a-zA-Z0-9_]{4,20}$', username)
+
+def is_valid_password(password):
+    return len(password) >= 8 and re.search(r'\d', password) and re.search(r'[A-Z]', password)
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
+
+        #유효성 검사
+        if not is_valid_username(username):
+            flash("아이디는 4~20자의 영문자/숫자/밑줄만 허용됩니다.")
+            return redirect(url_for('register'))
+        if not is_valid_password(password):
+            flash("비밀번호는 8자 이상이며, 숫자와 대문자를 포함해야 합니다.")
+            return redirect(url_for('register'))
+
         db = get_db()
         cursor = db.cursor()
-        # 중복 사용자 체크
+
+        #사용자명 중복 체크
         cursor.execute("SELECT * FROM user WHERE username = ?", (username,))
-        if cursor.fetchone() is not None:
-            flash('이미 존재하는 사용자명입니다.')
+        existing_user = cursor.fetchone()
+        if existing_user:
+            flash("이미 존재하는 사용자명입니다.")
             return redirect(url_for('register'))
-        user_id = str(uuid.uuid4())
-        cursor.execute("INSERT INTO user (id, username, password) VALUES (?, ?, ?)",
-                       (user_id, username, password))
+
+        #DB에 저장
+        cursor.execute("INSERT INTO user (username, password) VALUES (?, ?)", (username, password))
         db.commit()
-        flash('회원가입이 완료되었습니다. 로그인 해주세요.')
+        flash('회원가입이 완료되었습니다.')
         return redirect(url_for('login'))
+
     return render_template('register.html')
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
