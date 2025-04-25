@@ -131,14 +131,26 @@ def dashboard():
 def profile():
     if 'user_id' not in session:
         return redirect(url_for('login'))
+
     db = get_db()
     cursor = db.cursor()
+
     if request.method == 'POST':
         bio = request.form.get('bio', '')
+        new_password = request.form.get('new_password', '')
+
+        # bio 업데이트
         cursor.execute("UPDATE user SET bio = ? WHERE id = ?", (bio, session['user_id']))
+
+        # 비밀번호 변경 요청이 있으면 업데이트
+        if new_password.strip():  # 공백 제외하고 비어있지 않다면
+            cursor.execute("UPDATE user SET password = ? WHERE id = ?", (new_password, session['user_id']))
+            flash('비밀번호가 변경되었습니다.')
+
         db.commit()
         flash('프로필이 업데이트되었습니다.')
         return redirect(url_for('profile'))
+
     cursor.execute("SELECT * FROM user WHERE id = ?", (session['user_id'],))
     current_user = cursor.fetchone()
     return render_template('profile.html', user=current_user)
